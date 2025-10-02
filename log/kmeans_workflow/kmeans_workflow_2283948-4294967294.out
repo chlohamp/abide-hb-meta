@@ -1,4 +1,0 @@
-/home/data/nbc/misc-projects/meta-analyses/abide-hb-meta
-n099.panther.net
-Thu Jul 24 14:12:27 EDT 2025
-Commandline: python /home/data/nbc/misc-projects/meta-analyses/abide-hb-meta/kmeans-workflow.py --project_dir /home/data/nbc/misc-projects/meta-analyses/abide-hb-meta --n_cores 12

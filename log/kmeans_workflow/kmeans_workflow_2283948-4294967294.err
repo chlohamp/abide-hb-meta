@@ -1,5 +1,0 @@
-/home/champ007/kmeans_env/lib/python3.9/site-packages/seaborn/matrix.py:560: UserWarning: Clustering large matrix with scipy. Installing `fastcluster` may give better performance.
-  warnings.warn(msg)
-/home/champ007/kmeans_env/lib/python3.9/site-packages/seaborn/matrix.py:560: UserWarning: Clustering large matrix with scipy. Installing `fastcluster` may give better performance.
-  warnings.warn(msg)
-slurmstepd: error: *** JOB 2283948 ON n099 CANCELLED AT 2025-07-24T16:05:02 ***

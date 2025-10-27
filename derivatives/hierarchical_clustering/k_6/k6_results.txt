@@ -3,5 +3,4 @@ Method: hierarchical
 Silhouette score: 0.003
 gap_statistic: 2.194
 gap_std: 0.000
-Cophenetic correlation: 0.258
 Participants per group: [155 148  58 147  65 132]

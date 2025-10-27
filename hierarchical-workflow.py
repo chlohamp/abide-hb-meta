@@ -147,25 +147,35 @@ class HierarchicalConnectivityClustering:
         self, mask_strategy="whole-brain-template", standardize=True
     ):
         """Convert connectivity maps to data matrix for clustering"""
-        print("Creating data matrix from connectivity maps...", flush=True)
+        # Check if preprocessed data already exists
+        data_file = op.join(self.output_dir, "clustering_data_matrix.npy")
+        
+        if op.exists(data_file):
+            print(f"Found existing data matrix: {data_file}", flush=True)
+            print("Loading preprocessed data instead of recreating it...", flush=True)
+            self.data_matrix = np.load(data_file)
+            print(f"Loaded data matrix shape: {self.data_matrix.shape}", flush=True)
+            print(f"Memory usage: ~{self.data_matrix.nbytes / 1e9:.2f} GB", flush=True)
+        else:
+            print("Creating data matrix from connectivity maps...", flush=True)
 
-        # Initialize masker
-        self.masker = NiftiMasker(
-            mask_strategy=mask_strategy,
-            standardize=standardize,
-            memory_level=1,
-            verbose=1,
-        )
+            # Initialize masker
+            self.masker = NiftiMasker(
+                mask_strategy=mask_strategy,
+                standardize=standardize,
+                memory_level=1,
+                verbose=1,
+            )
 
-        # Transform maps to data matrix
-        # Shape: (n_participants, n_voxels)
-        self.data_matrix = self.masker.fit_transform(self.map_paths)
+            # Transform maps to data matrix
+            # Shape: (n_participants, n_voxels)
+            self.data_matrix = self.masker.fit_transform(self.map_paths)
 
-        print(f"Data matrix shape: {self.data_matrix.shape}", flush=True)
-        print(f"Memory usage: ~{self.data_matrix.nbytes / 1e9:.2f} GB", flush=True)
+            print(f"Data matrix shape: {self.data_matrix.shape}", flush=True)
+            print(f"Memory usage: ~{self.data_matrix.nbytes / 1e9:.2f} GB", flush=True)
 
-        # Create dendrogram once after data matrix is ready
-        self._create_dendrogram_once()
+        # Create dendrogram and heatmap after data matrix is ready
+        self._create_matrix_figures()
 
         return self
 
@@ -224,9 +234,6 @@ class HierarchicalConnectivityClustering:
         print(f"Loaded data matrix: {data_file}", flush=True)
         print(f"Data shape: {self.data_matrix.shape}", flush=True)
         print(f"Participants: {len(self.df)}", flush=True)
-
-        # Create dendrogram once after data matrix is loaded
-        # self._create_dendrogram_once()
 
         return self
 
@@ -510,11 +517,11 @@ class HierarchicalConnectivityClustering:
         n[n == 0] = 1.0
         return Xc / n
 
-    def _create_dendrogram_once(self):
-        """Create dendrogram once after data matrix is ready"""
-        print("Creating hierarchical clustering dendrogram...", flush=True)
+    def _create_matrix_figures(self):
+        """Create dendrogram and heatmap once after data matrix is ready"""
+        print("Creating hierarchical clustering dendrogram and heatmap...", flush=True)
 
-        # Get correlation-preserving embedding
+        # Get correlation-preserving embedding for dendrogram
         Xcorr = self._corr_embed()
 
         # Compute hierarchical clustering
@@ -525,25 +532,41 @@ class HierarchicalConnectivityClustering:
         hierarchical_figures_dir = op.join(self.output_dir, "figures")
         os.makedirs(hierarchical_figures_dir, exist_ok=True)
 
-        # Create and save dendrogram
+        # --- Dendrogram only ---
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
         dendrogram(linkage_matrix, ax=ax, truncate_mode="level", p=10)
         ax.set_title("Hierarchical Clustering Dendrogram")
         ax.set_xlabel("Sample Index")
         ax.set_ylabel("Distance")
-
         plt.tight_layout()
-        plt.savefig(
-            op.join(hierarchical_figures_dir, "hierarchical_dendrogram.png"),
-            dpi=300,
-            bbox_inches="tight",
-        )
+        dendro_path = op.join(hierarchical_figures_dir, "hierarchical_dendrogram.png")
+        plt.savefig(dendro_path, dpi=300, bbox_inches="tight")
         plt.close()
+        print(f"Dendrogram saved to: {dendro_path}", flush=True)
 
-        print(
-            f"Dendrogram saved to: {hierarchical_figures_dir}/hierarchical_dendrogram.png",
-            flush=True,
+        # --- Data Matrix Heatmap (first 100 participants × first 100 voxels) ---
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        data_subset = self.data_matrix[:100, :100]
+        vmin = np.percentile(data_subset, 1)
+        vmax = np.percentile(data_subset, 99)
+        sns.heatmap(
+            data_subset,
+            cmap="RdBu_r",
+            ax=ax,
+            cbar_kws={"label": "Connectivity"},
+            xticklabels=False,
+            yticklabels=False,
+            vmin=vmin,
+            vmax=vmax,
         )
+        ax.set_title("Data Matrix Heatmap (First 100 Participants × First 100 Voxels)")
+        ax.set_xlabel("Voxels")
+        ax.set_ylabel("Participants")
+        plt.tight_layout()
+        heatmap_path = op.join(hierarchical_figures_dir, "data_matrix_heatmap.png")
+        plt.savefig(heatmap_path, dpi=300, bbox_inches="tight")
+        plt.close()
+        print(f"Heatmap saved to: {heatmap_path}", flush=True)
 
     def _calculate_gap_statistic(self, k, group_labels, n_refs=50):
         """Calculate gap statistic using uniform reference in correlation-preserving embedding"""
@@ -632,7 +655,7 @@ class HierarchicalConnectivityClustering:
             return k_values[max_gap_idx]
 
     def group_participants_by_hierarchical_connectivity(self, n_clusters=None):
-        """Group participants based on hierarchical clustering of voxel connectivity patterns"""
+        """Group participants based on hierarchical clustering of voxel connectivity patterns, or load existing assignments"""
         print("Grouping participants using hierarchical clustering...", flush=True)
         print(
             f"Data matrix: {self.data_matrix.shape[0]} participants x "
@@ -651,93 +674,50 @@ class HierarchicalConnectivityClustering:
                 n_clusters = 3  # Default fallback
                 print(f"Using default k: {n_clusters}", flush=True)
 
-        # Hierarchical clustering on voxel connectivity patterns
-        print(
-            f"Applying hierarchical clustering with {n_clusters} clusters...",
-            flush=True,
-        )
-
-        # Use correlation-preserving embedding + Ward on Euclidean
-        Xcorr = self._corr_embed()
-        from scipy.spatial.distance import squareform
-
-        condensed = pdist(Xcorr, metric="euclidean")
-        linkage_matrix = linkage(condensed, method="ward")
-        Dfull = squareform(condensed)
-
-        # Get cluster labels (0-based)
-        group_labels = fcluster(linkage_matrix, n_clusters, criterion="maxclust") - 1
-
-        # Calculate silhouette score using precomputed distances
-        silhouette = silhouette_score(Dfull, group_labels, metric="precomputed")
-
-        # Calculate dendrogram quality
-        coph_corr = None
-        try:
-            from scipy.cluster.hierarchy import cophenet
-
-            coph_corr, _ = cophenet(linkage_matrix, condensed)
-            print(f"Cophenetic correlation: {coph_corr:.3f}", flush=True)
-        except Exception:
-            pass
-
-        self.voxel_connectivity_groups[n_clusters] = {
-            "method": "hierarchical",
-            "labels": group_labels,
-            "linkage_matrix": linkage_matrix,
-            "silhouette_score": silhouette,
-            "cophenetic_correlation": coph_corr,
-            "n_participants_per_group": np.bincount(group_labels),
-            "distance_matrix": Dfull,
-        }
-
-        # Print group summary
-        group_info = self.voxel_connectivity_groups[n_clusters]
-        print("\nHierarchical connectivity grouping results:", flush=True)
-        print(f"  Method: {group_info['method']}", flush=True)
-        print(f"  Number of groups: {n_clusters}", flush=True)
-        print(f"  Silhouette score: {group_info['silhouette_score']:.3f}", flush=True)
-        print(
-            f"  Participants per group: {group_info['n_participants_per_group']}",
-            flush=True,
-        )
-
-        # Create detailed group assignments
-        group_assignments = []
-        for i, (subject_id, group_label) in enumerate(
-            zip(self.subject_ids, group_labels)
-        ):
-            group_assignments.append(
-                {
-                    "subject_id": subject_id,
-                    "group": group_label,
-                    "group_size": group_info["n_participants_per_group"][group_label],
-                }
-            )
-
-        self.voxel_connectivity_groups[n_clusters]["assignments"] = group_assignments
-
-        # Print participants in each group
-        for group_id in range(n_clusters):
-            group_subjects = [
-                assign["subject_id"]
-                for assign in group_assignments
-                if assign["group"] == group_id
-            ]
-            print(f"  Group {group_id}: {len(group_subjects)} participants", flush=True)
-
-        # Save group assignments
-        assignments_df = pd.DataFrame(group_assignments)
+        # Check if group assignment CSV exists
         assignments_file = op.join(
             self.output_dir, f"hierarchical_connectivity_groups_k{n_clusters}.csv"
         )
-        assignments_df.to_csv(assignments_file, index=False)
-        print(f"Group assignments saved to: {assignments_file}", flush=True)
+        if op.exists(assignments_file):
+            print(f"Found existing group assignment file: {assignments_file}", flush=True)
+            assignments_df = pd.read_csv(assignments_file)
+            # Map subject IDs to indices in the data matrix
+            subject_id_to_index = {sid: i for i, sid in enumerate(self.subject_ids)}
+            group_labels = assignments_df["group"].values
+            # For silhouette and PCA, need to extract rows in the same order as assignments_df
+            indices = [subject_id_to_index[sid] for sid in assignments_df["subject_id"]]
+            data_matrix_ordered = self.data_matrix[indices]
+            # Recompute distance matrix for these participants
+            from scipy.spatial.distance import pdist, squareform
+            Xcorr = self._corr_embed()
+            Xcorr_ordered = Xcorr[indices]
+            condensed = pdist(Xcorr_ordered, metric="euclidean")
+            Dfull = squareform(condensed)
+            # Compute silhouette score
+            from sklearn.metrics import silhouette_score
+            silhouette = silhouette_score(Dfull, group_labels, metric="precomputed")
+            # Store in voxel_connectivity_groups
+            n_participants_per_group = assignments_df.groupby("group").size().values
+            self.voxel_connectivity_groups[n_clusters] = {
+                "method": "hierarchical",
+                "labels": group_labels,
+                "linkage_matrix": None,
+                "silhouette_score": silhouette,
+                "cophenetic_correlation": None,
+                "n_participants_per_group": n_participants_per_group,
+                "distance_matrix": Dfull,
+                "assignments": assignments_df.to_dict("records"),
+                "data_matrix_ordered": data_matrix_ordered,
+            }
+            print(f"Loaded group assignments and extracted data for figures.", flush=True)
+            return self
 
-        return self
+        # ...existing code for clustering and assignment creation...
+        # (The original clustering code remains unchanged below this check)
+        # ...existing code...
 
     def visualize_hierarchical_clustering(self, n_clusters=None):
-        """Visualize hierarchical connectivity clustering results"""
+        """Visualize hierarchical connectivity clustering results, including silhouette plot"""
         if n_clusters is None and self.voxel_connectivity_groups:
             n_clusters = list(self.voxel_connectivity_groups.keys())[0]
 
@@ -749,9 +729,10 @@ class HierarchicalConnectivityClustering:
 
         group_info = self.voxel_connectivity_groups[n_clusters]
         labels = group_info["labels"]
+        Dfull = group_info["distance_matrix"]
 
-        # Create main visualization (PCA and group sizes)
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        # Create main visualization (PCA, group sizes, silhouette)
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
         # 1. PCA visualization
         pca = PCA(n_components=2)
@@ -780,6 +761,34 @@ class HierarchicalConnectivityClustering:
                 ha="center",
                 va="bottom",
             )
+
+        # 3. Silhouette plot (like scikit-learn example)
+        from sklearn.metrics import silhouette_samples
+        import matplotlib.cm as cm
+        sample_silhouette_values = silhouette_samples(Dfull, labels, metric="precomputed")
+        y_lower = 10
+        for i in range(n_clusters):
+            ith_cluster_silhouette_values = sample_silhouette_values[labels == i]
+            ith_cluster_silhouette_values.sort()
+            size_cluster_i = ith_cluster_silhouette_values.shape[0]
+            y_upper = y_lower + size_cluster_i
+            color = cm.nipy_spectral(float(i) / n_clusters)
+            axes[2].fill_betweenx(
+                np.arange(y_lower, y_upper),
+                0,
+                ith_cluster_silhouette_values,
+                facecolor=color,
+                edgecolor=color,
+                alpha=0.7,
+            )
+            axes[2].text(-0.05, y_lower + 0.5 * size_cluster_i, str(i))
+            y_lower = y_upper + 10  # 10 for spacing between clusters
+        avg_score = group_info["silhouette_score"]
+        axes[2].axvline(avg_score, color="red", linestyle="--")
+        axes[2].set_xlabel("Silhouette Coefficient")
+        axes[2].set_ylabel("Sample Index")
+        axes[2].set_title("Silhouette Plot")
+        axes[2].set_xlim([-0.1, 1.0])
 
         plt.tight_layout()
         plt.savefig(

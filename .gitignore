@@ -2,3 +2,4 @@
 /derivatives/hierarchical_clustering/clustering_data_matrix.npy
 derivatives/hierarchical_clustering/*.npy
 /__pycache__/
+/derivatives/hierarchical_clustering/masker.pkl

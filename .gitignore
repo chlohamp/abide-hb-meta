@@ -3,3 +3,4 @@
 derivatives/hierarchical_clustering/*.npy
 /__pycache__/
 /derivatives/hierarchical_clustering/masker.pkl
+/derivatives/hierarchical_clustering/k_*/nifti/

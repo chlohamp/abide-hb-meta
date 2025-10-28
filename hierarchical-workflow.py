@@ -788,7 +788,7 @@ class HierarchicalConnectivityClustering:
         axes[2].set_xlabel("Silhouette Coefficient")
         axes[2].set_ylabel("Sample Index")
         axes[2].set_title("Silhouette Plot")
-        axes[2].set_xlim([-0.1, 1.0])
+        axes[2].set_xlim([-0.1, 0.1])
 
         plt.tight_layout()
         plt.savefig(

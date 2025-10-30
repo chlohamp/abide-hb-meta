@@ -278,11 +278,30 @@ class HierarchicalConnectivityClustering:
             # Calculate gap statistic
             gap_stat, gap_std = self._calculate_gap_statistic(k, group_labels)
 
+            # Calculate VRC components
+            wcss = self._within_cluster_dispersion(Xcorr, group_labels, k)
+            bcss = self._between_cluster_dispersion(Xcorr, group_labels, k)
+            total_ss = wcss + bcss
+            vrc = (bcss / (k - 1)) / (wcss / (len(Xcorr) - k)) if k > 1 else 0
+
+            # Calculate cluster separation
+            centroids, cluster_separation = self._calculate_cluster_separation(Xcorr, group_labels, k)
+
+            # Calculate hierarchy index
+            hierarchy_index = self._calculate_hierarchy_index(linkage_matrix, k)
+
             self.cluster_metrics[k] = {
                 "silhouette": sil_score,
                 "gap_statistic": gap_stat,
                 "gap_std": gap_std,
                 "cophenetic_correlation": coph_corr,
+                "vrc": vrc,
+                "wcss": wcss,
+                "bcss": bcss,
+                "total_ss": total_ss,
+                "cluster_separation": cluster_separation,
+                "hierarchy_index": hierarchy_index,
+                "centroids": centroids,
             }
 
         # Create validation plots
@@ -297,6 +316,7 @@ class HierarchicalConnectivityClustering:
         axes[0].set_xlabel("Number of Clusters (k)")
         axes[0].set_ylabel("Silhouette Score")
         axes[0].set_title("Silhouette Analysis - Hierarchical Clustering")
+        axes[0].set_ylim(-0.1, 0.1)  # Set y-axis range from -0.1 to 0.1
         axes[0].grid(True, alpha=0.3)
 
         # Highlight best k
@@ -395,6 +415,12 @@ class HierarchicalConnectivityClustering:
                     "silhouette_score": metrics.get("silhouette", None),
                     "gap_statistic": metrics.get("gap_statistic", None),
                     "gap_std": metrics.get("gap_std", None),
+                    "vrc": metrics.get("vrc", None),
+                    "wcss": metrics.get("wcss", None),
+                    "bcss": metrics.get("bcss", None),
+                    "total_ss": metrics.get("total_ss", None),
+                    "cluster_separation": metrics.get("cluster_separation", None),
+                    "hierarchy_index": metrics.get("hierarchy_index", None),
                 }
             )
 
@@ -618,15 +644,69 @@ class HierarchicalConnectivityClustering:
     def _within_cluster_dispersion(self, data, labels, k):
         """Calculate within-cluster dispersion (sum of squared distances to centroids)"""
         total_dispersion = 0
+        centroids = []
         for cluster_id in range(k):
             cluster_mask = labels == cluster_id
             if np.sum(cluster_mask) > 0:
                 cluster_data = data[cluster_mask]
                 if len(cluster_data) > 1:
                     cluster_center = np.mean(cluster_data, axis=0)
+                    centroids.append(cluster_center)
                     cluster_dispersion = np.sum((cluster_data - cluster_center) ** 2)
                     total_dispersion += cluster_dispersion
         return total_dispersion
+
+    def _between_cluster_dispersion(self, data, labels, k):
+        """Calculate between-cluster dispersion"""
+        total_mean = np.mean(data, axis=0)
+        bcss = 0
+        for cluster_id in range(k):
+            cluster_mask = labels == cluster_id
+            if np.sum(cluster_mask) > 0:
+                cluster_data = data[cluster_mask]
+                cluster_mean = np.mean(cluster_data, axis=0)
+                n_points = len(cluster_data)
+                bcss += n_points * np.sum((cluster_mean - total_mean) ** 2)
+        return bcss
+
+    def _calculate_cluster_separation(self, data, labels, k):
+        """Calculate average separation between cluster centroids"""
+        # Calculate centroids
+        centroids = []
+        for cluster_id in range(k):
+            cluster_mask = labels == cluster_id
+            if np.sum(cluster_mask) > 0:
+                cluster_data = data[cluster_mask]
+                centroid = np.mean(cluster_data, axis=0)
+                centroids.append(centroid)
+        
+        centroids = np.array(centroids)
+        
+        # Calculate average pairwise distances between centroids
+        if len(centroids) > 1:
+            centroid_distances = pdist(centroids, metric='euclidean')
+            avg_separation = np.mean(centroid_distances)
+        else:
+            avg_separation = 0.0
+            
+        return centroids, avg_separation
+
+    def _calculate_hierarchy_index(self, linkage_matrix, k):
+        """Calculate hierarchy index based on dendrogram structure"""
+        if k <= 1:
+            return 0.0
+            
+        # Extract heights from linkage matrix
+        heights = linkage_matrix[:, 2]
+        
+        # Calculate ratio of consecutive heights
+        height_ratios = heights[:-1] / heights[1:]
+        
+        # Use the average ratio of heights relevant to k clusters
+        relevant_ratios = height_ratios[-(k-1):]
+        hierarchy_index = np.mean(relevant_ratios) if len(relevant_ratios) > 0 else 0.0
+        
+        return hierarchy_index
 
     def _find_optimal_k_gap(self, k_values):
         """Find optimal k using Tibshirani gap rule"""
@@ -788,7 +868,7 @@ class HierarchicalConnectivityClustering:
         axes[2].set_xlabel("Silhouette Coefficient")
         axes[2].set_ylabel("Sample Index")
         axes[2].set_title("Silhouette Plot")
-        axes[2].set_xlim([-0.1, 0.1])
+        axes[2].set_xlim([-0.1, 1.0])
 
         plt.tight_layout()
         plt.savefig(

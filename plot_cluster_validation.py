@@ -128,6 +128,9 @@ def collect_all_results(results_dir, k_min=2, k_max=10):
                     "silhouette": row.get("silhouette_score", np.nan),
                     "gap_statistic": row.get("gap_statistic", np.nan),
                     "gap_std": row.get("gap_std", np.nan),
+                    "vrc": row.get("vrc", np.nan),
+                    "cluster_separation": row.get("cluster_separation", np.nan),
+                    "hierarchy_index": row.get("hierarchy_index", np.nan),
                 }
                 all_metrics.append(metrics)
 
@@ -170,8 +173,8 @@ def collect_all_results(results_dir, k_min=2, k_max=10):
     return all_metrics
 
 
-def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
-    """Create elbow and silhouette validation plots"""
+def plot_validation_metrics(all_metrics, output_dir, figsize=(15, 10), dpi=300):
+    """Create comprehensive validation plots including silhouette, gap statistic, VRC, cluster separation, and hierarchy index"""
     if not all_metrics:
         raise ValueError("No valid metrics found to plot")
 
@@ -184,12 +187,19 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
     # Check if we have silhouette scores
     has_silhouette = not all(np.isnan(silhouette_scores))
 
-    # Create figure
-    if has_silhouette:
-        fig, axes = plt.subplots(1, 2, figsize=figsize)
-    else:
-        fig, axes = plt.subplots(1, 1, figsize=(figsize[0] / 2, figsize[1]))
-        axes = [axes]
+    # Create figure with 5 subplots (2 rows, 3 columns)
+    fig = plt.figure(figsize=figsize)
+    gs = plt.GridSpec(2, 3, figure=fig)
+    
+    # Create axes for each plot
+    ax_sil = fig.add_subplot(gs[0, 0])  # Silhouette score
+    ax_gap = fig.add_subplot(gs[0, 1])  # Gap statistic
+    ax_vrc = fig.add_subplot(gs[0, 2])  # VRC
+    ax_sep = fig.add_subplot(gs[1, 0])  # Cluster separation
+    ax_hi = fig.add_subplot(gs[1, 1])   # Hierarchy index
+    ax_group = fig.add_subplot(gs[1, 2]) # Group sizes
+    
+    axes = [ax_sil, ax_gap, ax_vrc, ax_sep, ax_hi, ax_group]
 
     # Plot 1: Silhouette Analysis
     if has_silhouette:
@@ -226,59 +236,127 @@ def plot_validation_metrics(all_metrics, output_dir, figsize=(12, 5), dpi=300):
             )
 
     # Plot 2: Gap Statistic
-    if len(axes) > 1:
-        gap_values = [m.get("gap_statistic", np.nan) for m in all_metrics]
-        gap_stds = [m.get("gap_std", np.nan) for m in all_metrics]
-        has_gap = not all(np.isnan(gap_values))
+    gap_values = [m.get("gap_statistic", np.nan) for m in all_metrics]
+    gap_stds = [m.get("gap_std", np.nan) for m in all_metrics]
+    has_gap = not all(np.isnan(gap_values))
 
-        if has_gap:
-            valid_indices = ~np.isnan(gap_values)
-            valid_k = np.array(k_values)[valid_indices]
-            valid_gap = np.array(gap_values)[valid_indices]
-            valid_gap_std = np.array(gap_stds)[valid_indices]
+    if has_gap:
+        valid_indices = ~np.isnan(gap_values)
+        valid_k = np.array(k_values)[valid_indices]
+        valid_gap = np.array(gap_values)[valid_indices]
+        valid_gap_std = np.array(gap_stds)[valid_indices]
 
-            axes[1].errorbar(
-                valid_k,
-                valid_gap,
-                yerr=valid_gap_std,
-                fmt="o-",
-                linewidth=2,
-                markersize=6,
-                color="green",
-                capsize=5,
+        axes[1].errorbar(
+            valid_k,
+            valid_gap,
+            yerr=valid_gap_std,
+            fmt="o-",
+            linewidth=2,
+            markersize=6,
+            color="green",
+            capsize=5,
+        )
+        axes[1].set_xlabel("Number of Clusters (k)")
+        axes[1].set_ylabel("Gap Statistic")
+        axes[1].set_title("Gap Statistic Analysis")
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_xticks(valid_k)
+
+    # Plot 3: Variance Ratio Criterion (VRC)
+    vrc_values = [m.get("vrc", np.nan) for m in all_metrics]
+    has_vrc = not all(np.isnan(vrc_values))
+
+    if has_vrc:
+        valid_indices = ~np.isnan(vrc_values)
+        valid_k = np.array(k_values)[valid_indices]
+        valid_vrc = np.array(vrc_values)[valid_indices]
+
+        axes[2].plot(
+            valid_k,
+            valid_vrc,
+            "o-",
+            linewidth=2,
+            markersize=6,
+            color="purple",
+        )
+        axes[2].set_xlabel("Number of Clusters (k)")
+        axes[2].set_ylabel("Variance Ratio Criterion")
+        axes[2].set_title("VRC Analysis")
+        axes[2].grid(True, alpha=0.3)
+        axes[2].set_xticks(valid_k)
+
+    # Plot 4: Cluster Separation
+    sep_values = [m.get("cluster_separation", np.nan) for m in all_metrics]
+    has_sep = not all(np.isnan(sep_values))
+
+    if has_sep:
+        valid_indices = ~np.isnan(sep_values)
+        valid_k = np.array(k_values)[valid_indices]
+        valid_sep = np.array(sep_values)[valid_indices]
+
+        axes[3].plot(
+            valid_k,
+            valid_sep,
+            "o-",
+            linewidth=2,
+            markersize=6,
+            color="orange",
+        )
+        axes[3].set_xlabel("Number of Clusters (k)")
+        axes[3].set_ylabel("Cluster Separation")
+        axes[3].set_title("Cluster Separation Analysis")
+        axes[3].grid(True, alpha=0.3)
+        axes[3].set_xticks(valid_k)
+
+    # Plot 5: Hierarchy Index
+    hi_values = [m.get("hierarchy_index", np.nan) for m in all_metrics]
+    has_hi = not all(np.isnan(hi_values))
+
+    if has_hi:
+        valid_indices = ~np.isnan(hi_values)
+        valid_k = np.array(k_values)[valid_indices]
+        valid_hi = np.array(hi_values)[valid_indices]
+
+        axes[4].plot(
+            valid_k,
+            valid_hi,
+            "o-",
+            linewidth=2,
+            markersize=6,
+            color="brown",
+        )
+        axes[4].set_xlabel("Number of Clusters (k)")
+        axes[4].set_ylabel("Hierarchy Index")
+        axes[4].set_title("Hierarchy Index Analysis")
+        axes[4].grid(True, alpha=0.3)
+        axes[4].set_xticks(valid_k)
+
+    # Plot 6: Group Sizes
+    axes[5].set_title("Group Sizes by k")
+    axes[5].set_xlabel("Number of Clusters (k)")
+    axes[5].set_ylabel("Participants per Group")
+
+    # Create grouped bar chart for group sizes
+    width = 0.8 / max(k_values) if k_values else 0.1
+    for i, metrics in enumerate(all_metrics):
+        k = metrics["k"]
+        group_sizes = metrics.get("group_sizes", [])
+        if group_sizes:
+            positions = [
+                k + j * width - width * len(group_sizes) / 2
+                for j in range(len(group_sizes))
+            ]
+            axes[5].bar(
+                positions,
+                group_sizes,
+                width=width,
+                alpha=0.7,
+                label=f"k={k}" if len(all_metrics) <= 5 else None,
             )
-            axes[1].set_xlabel("Number of Clusters (k)")
-            axes[1].set_ylabel("Gap Statistic")
-            axes[1].set_title("Gap Statistic Analysis")
-            axes[1].grid(True, alpha=0.3)
-            axes[1].set_xticks(valid_k)
-        else:
-            # Plot group sizes as bar chart instead
-            axes[1].set_title("Group Sizes by k")
-            axes[1].set_xlabel("Number of Clusters (k)")
-            axes[1].set_ylabel("Participants per Group")
 
-            # Create grouped bar chart
-            width = 0.8 / max(k_values) if k_values else 0.1
-            for i, metrics in enumerate(all_metrics):
-                k = metrics["k"]
-                group_sizes = metrics.get("group_sizes", [])
-                if group_sizes:
-                    positions = [
-                        k + j * width - width * len(group_sizes) / 2
-                        for j in range(len(group_sizes))
-                    ]
-                    axes[1].bar(
-                        positions,
-                        group_sizes,
-                        width=width,
-                        alpha=0.7,
-                        label=f"k={k}" if len(all_metrics) <= 5 else None,
-                    )
-
-            if len(all_metrics) <= 5:
-                axes[1].legend()
-            axes[1].grid(True, alpha=0.3)
+    if len(all_metrics) <= 5:
+        axes[5].legend()
+    axes[5].grid(True, alpha=0.3)
 
     plt.tight_layout()
 

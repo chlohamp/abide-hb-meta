@@ -3,4 +3,10 @@ Method: hierarchical
 Silhouette score: 0.007
 gap_statistic: 2.175
 gap_std: 0.000
+vrc: 5.969
+wcss: 698.606
+bcss: 5.932
+total_ss: 704.538
+cluster_separation: 0.185
+hierarchy_index: 0.931
 Participants per group: [303 402]

@@ -401,136 +401,6 @@ class HierarchicalConnectivityClustering:
 
         return self
 
-    def _create_validation_dataframe(self):
-        """Create DataFrame with k values, silhouette scores, and gap statistics"""
-        print("Creating validation metrics DataFrame...", flush=True)
-
-        # Prepare data for DataFrame
-        validation_data = []
-        for k in sorted(self.cluster_metrics.keys()):
-            metrics = self.cluster_metrics[k]
-            validation_data.append(
-                {
-                    "k": k,
-                    "silhouette_score": metrics.get("silhouette", None),
-                    "gap_statistic": metrics.get("gap_statistic", None),
-                    "gap_std": metrics.get("gap_std", None),
-                    "vrc": metrics.get("vrc", None),
-                    "wcss": metrics.get("wcss", None),
-                    "bcss": metrics.get("bcss", None),
-                    "total_ss": metrics.get("total_ss", None),
-                    "cluster_separation": metrics.get("cluster_separation", None),
-                    "hierarchy_index": metrics.get("hierarchy_index", None),
-                }
-            )
-
-        # Create DataFrame
-        self.validation_df = pd.DataFrame(validation_data)
-
-        # Save DataFrame with thread-safe approach
-        self._save_validation_dataframe(self.validation_df)
-
-        return self.validation_df
-
-    def _save_validation_dataframe(self, df):
-        """Save validation DataFrame to CSV with thread-safe file locking"""
-        import fcntl
-        import time
-
-        csv_file = op.join(self.output_dir, "cluster_validation_metrics.csv")
-        lock_file = csv_file + ".lock"
-
-        max_attempts = 10
-        for attempt in range(max_attempts):
-            try:
-                # Create lock file and acquire exclusive lock
-                with open(lock_file, "w") as lock:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-                    # Save the DataFrame
-                    df.to_csv(csv_file, index=False)
-                    print(f"Validation DataFrame saved to: {csv_file}", flush=True)
-                    print(f"DataFrame shape: {df.shape}", flush=True)
-                    break
-
-            except (IOError, OSError) as e:
-                if attempt < max_attempts - 1:
-                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
-                    continue
-                else:
-                    print(
-                        f"Failed to save DataFrame after {max_attempts} attempts: {e}",
-                        flush=True,
-                    )
-
-        # Clean up lock file
-        try:
-            if op.exists(lock_file):
-                os.remove(lock_file)
-        except:
-            pass
-
-    def _append_to_validation_dataframe(
-        self, k_value, silhouette_score, gap_stat, gap_std
-    ):
-        """Thread-safe method to append single k results to validation DataFrame"""
-        import fcntl
-        import time
-
-        csv_file = op.join(self.output_dir, "cluster_validation_metrics.csv")
-        lock_file = csv_file + ".lock"
-
-        # New row to add
-        new_row = {
-            "k": k_value,
-            "silhouette_score": silhouette_score,
-            "gap_statistic": gap_stat,
-            "gap_std": gap_std,
-        }
-
-        max_attempts = 10
-        for attempt in range(max_attempts):
-            try:
-                # Create lock file and acquire exclusive lock
-                with open(lock_file, "w") as lock:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-
-                    # Load existing DataFrame or create new one
-                    if op.exists(csv_file):
-                        existing_df = pd.read_csv(csv_file)
-                        # Remove any existing row for this k value
-                        existing_df = existing_df[existing_df["k"] != k_value]
-                        # Add new row
-                        updated_df = pd.concat(
-                            [existing_df, pd.DataFrame([new_row])], ignore_index=True
-                        )
-                    else:
-                        updated_df = pd.DataFrame([new_row])
-
-                    # Sort by k value and save
-                    updated_df = updated_df.sort_values("k").reset_index(drop=True)
-                    updated_df.to_csv(csv_file, index=False)
-
-                    print(f"Updated validation DataFrame with k={k_value}", flush=True)
-                    print(f"Current DataFrame shape: {updated_df.shape}", flush=True)
-                    break
-
-            except (IOError, OSError) as e:
-                if attempt < max_attempts - 1:
-                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff
-                    continue
-                else:
-                    print(
-                        f"Failed to update DataFrame after {max_attempts} attempts: {e}",
-                        flush=True,
-                    )
-
-        # Clean up lock file
-        try:
-            if op.exists(lock_file):
-                os.remove(lock_file)
-        except:
-            pass
 
     def _corr_embed(self):
         """
@@ -903,15 +773,39 @@ class HierarchicalConnectivityClustering:
 
         # Get results for this k
         group_info = self.voxel_connectivity_groups[k_value]
+        group_labels = group_info["labels"]
+
+        # Get correlation-preserving embedding for additional metrics
+        Xcorr = self._corr_embed()
+        
+        # Calculate additional metrics that weren't computed during clustering
+        wcss = self._within_cluster_dispersion(Xcorr, group_labels, k_value)
+        bcss = self._between_cluster_dispersion(Xcorr, group_labels, k_value)
+        total_ss = wcss + bcss
+        vrc = (bcss / (k_value - 1)) / (wcss / (len(Xcorr) - k_value)) if k_value > 1 and wcss > 0 else 0
+
+        # Calculate cluster separation
+        centroids, cluster_separation = self._calculate_cluster_separation(Xcorr, group_labels, k_value)
+
+        # Calculate hierarchy index - we need to recompute linkage for this k
+        condensed = pdist(Xcorr, metric="euclidean")
+        linkage_matrix = linkage(condensed, method="ward")
+        hierarchy_index = self._calculate_hierarchy_index(linkage_matrix, k_value)
 
         # Calculate gap statistic for this k
-        group_labels = group_info["labels"]
         gap_stat, gap_std = self._calculate_gap_statistic(k_value, group_labels)
 
-        # Add gap statistics to the group info
-        if gap_stat is not None:
-            self.voxel_connectivity_groups[k_value]["gap_statistic"] = gap_stat
-            self.voxel_connectivity_groups[k_value]["gap_std"] = gap_std
+        # Add all metrics to the group info
+        group_info.update({
+            "gap_statistic": gap_stat,
+            "gap_std": gap_std,
+            "vrc": vrc,
+            "wcss": wcss,
+            "bcss": bcss,
+            "total_ss": total_ss,
+            "cluster_separation": cluster_separation,
+            "hierarchy_index": hierarchy_index,
+        })
 
         # Create visualizations for this k
         self.visualize_hierarchical_clustering(n_clusters=k_value)
@@ -920,12 +814,30 @@ class HierarchicalConnectivityClustering:
         self.output_dir = original_output_dir
         self.figures_dir = original_figures_dir
 
-        # Thread-safe append to validation DataFrame
-        self._append_to_validation_dataframe(
-            k_value, group_info["silhouette_score"], gap_stat, gap_std
-        )
+        # Removed DataFrame appending - metrics are now saved per k directory
 
-        # Save results summary for this k
+        # Save detailed metrics for this k to a CSV
+        metrics_df = pd.DataFrame({
+            'k': [k_value],
+            'silhouette_score': [group_info['silhouette_score']],
+            'gap_statistic': [group_info.get('gap_statistic', np.nan)],
+            'gap_std': [group_info.get('gap_std', np.nan)],
+            'vrc': [group_info.get('vrc', np.nan)],
+            'wcss': [group_info.get('wcss', np.nan)],
+            'bcss': [group_info.get('bcss', np.nan)],
+            'total_ss': [group_info.get('total_ss', np.nan)],
+            'cluster_separation': [group_info.get('cluster_separation', np.nan)],
+            'hierarchy_index': [group_info.get('hierarchy_index', np.nan)],
+            'cophenetic_correlation': [group_info.get('cophenetic_correlation', np.nan)],
+        })
+        
+        # Save metrics to CSV in k_specific directory
+        metrics_csv = op.join(k_output_dir, f"k{k_value}_validation_metrics.csv")
+        metrics_df.to_csv(metrics_csv, index=False)
+        print(f"Saved validation metrics to: {metrics_csv}", flush=True)
+        print(f"VRC: {group_info.get('vrc', 'N/A')}, Cluster Sep: {group_info.get('cluster_separation', 'N/A')}", flush=True)
+
+        # Still save text summary for backward compatibility
         results_file = op.join(k_output_dir, f"k{k_value}_results.txt")
         with open(results_file, "w") as f:
             f.write(f"Results for k={k_value}:\n")
@@ -935,6 +847,18 @@ class HierarchicalConnectivityClustering:
                 f.write(f"gap_statistic: {group_info['gap_statistic']:.3f}\n")
             if group_info.get("gap_std") is not None:
                 f.write(f"gap_std: {group_info['gap_std']:.3f}\n")
+            if group_info.get("vrc") is not None:
+                f.write(f"vrc: {group_info['vrc']:.3f}\n")
+            if group_info.get("wcss") is not None:
+                f.write(f"wcss: {group_info['wcss']:.3f}\n")
+            if group_info.get("bcss") is not None:
+                f.write(f"bcss: {group_info['bcss']:.3f}\n")
+            if group_info.get("total_ss") is not None:
+                f.write(f"total_ss: {group_info['total_ss']:.3f}\n")
+            if group_info.get("cluster_separation") is not None:
+                f.write(f"cluster_separation: {group_info['cluster_separation']:.3f}\n")
+            if group_info.get("hierarchy_index") is not None:
+                f.write(f"hierarchy_index: {group_info['hierarchy_index']:.3f}\n")
             if group_info.get("cophenetic_correlation") is not None:
                 f.write(
                     f"Cophenetic correlation: {group_info['cophenetic_correlation']:.3f}\n"

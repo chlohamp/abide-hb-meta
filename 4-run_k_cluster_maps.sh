@@ -29,11 +29,11 @@ K_VALUES="3 4"          # Examples: "2" or "2 3 4 5" or "2 3 4 5 6 7 8 9"
 
 THRESHOLD=None        # Threshold for plotting (use 'None' for auto-threshold)
 USE_PVAL=true         # Set to 'true' to use p-value thresholding
-PVAL_THRESHOLD=0.05   # Voxel-level p-value threshold (only used if USE_PVAL=true)
-CLUSTER_THRESHOLD=20  # Cluster size threshold in voxels (only used if USE_PVAL=true)
+PVAL_THRESHOLD=0.01   # Voxel-level p-value threshold (only used if USE_PVAL=true)
+CLUSTER_THRESHOLD=50  # Cluster size threshold in voxels (only used if USE_PVAL=true)
 CORRECTION=all        # Correction method: none, fwe, fdr, or all (default: none)
-FWE_THRESHOLD=0.05    # FWE-corrected alpha level (only used if CORRECTION=fwe or all)
-FDR_THRESHOLD=0.05    # FDR-corrected q-value threshold (only used if CORRECTION=fdr or all)
+FWE_THRESHOLD=0.01    # FWE-corrected alpha level (only used if CORRECTION=fwe or all)
+FDR_THRESHOLD=0.01    # FDR-corrected q-value threshold (only used if CORRECTION=fdr or all)
 
 # Load environment
 module load miniconda3-4.5.11-gcc-8.2.0-oqs2mbg
